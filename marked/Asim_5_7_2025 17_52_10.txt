@@ -1,4 +1,4 @@
 {
     "score": 85,
-    "feedback": "The implementation correctly follows the data science techniques for training an ANN on the MNIST dataset, including normalization and reshaping of images. The code is well-structured and uses appropriate libraries like TensorFlow and sklearn. However, the prediction for the random samples is not displayed alongside their actual labels, which is a minor oversight in meeting the assignment objectives."
+    "feedback": "The code implements the MNIST classification task effectively with appropriate data preprocessing, model building, training, evaluation, and saving. Good use of TensorFlow and sklearn libraries. Consider adding comments for better code readability and structure."
 }

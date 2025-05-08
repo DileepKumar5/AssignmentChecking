@@ -15,17 +15,22 @@ from langchain_community.document_loaders import TextLoader
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain.chains import RetrievalQA
 from langchain.docstore.document import Document
+import smtplib
+from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
+from dotenv import load_dotenv
 
-# Load environment
+# Load environment variables
 load_dotenv()
-api_key = os.getenv("OPENAI_API_KEY")
-if not api_key:
-    raise ValueError("❌ OPENAI_API_KEY not found in environment.")
 
-# Initialize LLM
-llm = ChatOpenAI(model="gpt-4o-mini", temperature=0.3)
+# Access the variables
+EMAIL_USER = os.getenv("EMAIL_USER")
+EMAIL_PASSWORD = os.getenv("EMAIL_PASSWORD")
+SMTP_SERVER = os.getenv("SMTP_SERVER")
+SMTP_PORT = int(os.getenv("SMTP_PORT"))
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 
-# Authenticate with Google Drive and Sheets
+
 def authenticate_google_services(credentials_json):
     credentials = Credentials.from_service_account_file(
         credentials_json,
@@ -39,6 +44,26 @@ def authenticate_google_services(credentials_json):
     gc = gspread.authorize(credentials)
     
     return drive_service, gc
+
+def send_email(to_email, subject, body):
+    try:
+        # Create the MIME object with HTML content type
+        msg = MIMEMultipart("alternative")
+        msg["Subject"] = subject
+        msg["From"] = EMAIL_USER
+        msg["To"] = to_email
+
+        # Create the plain-text and HTML versions of the message
+        part1 = MIMEText(body, "html")  # Specify 'html' to ensure HTML rendering
+        msg.attach(part1)
+
+        # Send the email
+        with smtplib.SMTP_SSL(SMTP_SERVER, SMTP_PORT) as server:
+            server.login(EMAIL_USER, EMAIL_PASSWORD)
+            server.send_message(msg)
+        print(f"[📧] Feedback sent to {to_email}")
+    except Exception as e:
+        print(f"[⚠️] Failed to send email to {to_email}: {e}")
 
 # Extract file ID from Google Form URL
 def extract_file_id(file_url):
@@ -70,7 +95,6 @@ def extract_code_from_notebook(notebook_path):
 
 # Extract rubric from notebook
 def extract_rubric_from_notebook(rubric_notebook_path):
-    # Check if the file exists
     if not os.path.exists(rubric_notebook_path):
         raise FileNotFoundError(f"Rubric notebook not found: {rubric_notebook_path}")
     
@@ -81,38 +105,69 @@ def extract_rubric_from_notebook(rubric_notebook_path):
 # Set up RAG from rubric notebook
 def setup_rag_from_notebook(rubric_notebook_path):
     documents = extract_rubric_from_notebook(rubric_notebook_path)
+    full_rubric_text = documents[0].page_content  # Extract the full text for question
+
     splitter = RecursiveCharacterTextSplitter(chunk_size=500, chunk_overlap=50)
     docs = splitter.split_documents(documents)
     db = Chroma.from_documents(docs, OpenAIEmbeddings())
-    return db.as_retriever(search_kwargs={"k": 3})
+    return db.as_retriever(search_kwargs={"k": 3}), full_rubric_text
+
 
 # Evaluate code
-def evaluate_code(code_str, retriever):
+def evaluate_code(code_str, retriever, assignment_question):
+    llm = ChatOpenAI(openai_api_key=OPENAI_API_KEY, temperature=0)
+
     qa_chain = RetrievalQA.from_chain_type(
         llm=llm,
         retriever=retriever,
         return_source_documents=False
     )
     prompt = f"""
-    You are a senior Data Science instructor. Evaluate the student's code submission below.
-    Assess the solution for:
-        - Correct implementation of data science techniques
-        - Code quality, logic, and structure
-        - Use of appropriate libraries and practices (e.g., pandas, sklearn, matplotlib, etc.)
-        - Relevance and accuracy based on the assignment objectives
+    You are a senior Data Science instructor reviewing a student's assignment submission.
 
-    Give a score from 0 to 100 and a short feedback summary (2–4 concise, helpful sentences).
+    You have both the original assignment question and the student's submission.
 
-    **Strictly return the result as a valid JSON object** in the format:
+    1. If the student has submitted **only Markdown** (i.e., no Python code at all), or if they have **copied the assignment question without answering**, then:
+        - Assign a score of 0.
+        - Write clear feedback using a friendly but firm tone like a teacher, saying things like:
+            - "You did not implement any code."
+            - "Your submission is just a copy of the question or explanation."
+            - "To receive credit, you must submit working Python code, including model training, evaluation, and comparison."
+        - End the feedback by encouraging the student to try again.
+
+    2. If the student has written **actual Python code**, assess their work in terms of:
+        - Correct use of data science and machine learning techniques
+        - Code quality, logic, structure
+        - Use of proper libraries (e.g., pandas, sklearn, tensorflow, matplotlib, etc.)
+        - Whether the steps align with the assignment’s goals (e.g., training ANN vs CNN on MNIST)
+
+    3. Provide helpful feedback using a teaching tone:
+        - Point out what **you did well**
+        - Point out **what’s missing or wrong**
+        - Suggest how **you can improve**
+        - Provide any best practices or tips
+
+    4. Give a score based on:
+        - 100: Excellent work with no issues
+        - 90–99: Great work with minor issues
+        - 80–89: Good work with some improvements needed
+        - 0: If there is no code, or it’s just Markdown/copy-paste of the question
+
+    Return your result strictly as a **valid JSON**:
     {{
     "score": <integer between 0 and 100>,
-    "feedback": "<short, helpful feedback>"
+    "feedback": "<helpful, direct feedback using 'you'>"
     }}
 
-    Here is the student's code:
+    Here is the assignment question:
+
+    {assignment_question}
+
+    Here is the student's submission:
 
     ```python
     {code_str}
+
 
     ```
 
@@ -124,19 +179,17 @@ def evaluate_code(code_str, retriever):
     """
     return qa_chain.run({"query": prompt})
 
-# Save result to file
+
 # Save result to file
 def save_result(result_str, submission_path):
     base_name = os.path.splitext(os.path.basename(submission_path))[0]
     output_path = f"marked/{base_name}.txt"
     
-    # Ensure 'marked/' directory exists
     os.makedirs(os.path.dirname(output_path), exist_ok=True)
     
     with open(output_path, "w", encoding="utf-8") as f:
         f.write(result_str)
     print(f"[💾] Result saved to {output_path}")
-
 
 # Move the submitted notebook to the destination folder
 def move_submission_to_destination(submission_path, destination_folder):
@@ -145,7 +198,6 @@ def move_submission_to_destination(submission_path, destination_folder):
     file_name = os.path.basename(submission_path)
     destination_path = os.path.join(destination_folder, file_name)
     
-    # Move the file
     shutil.move(submission_path, destination_path)
     print(f"[📦] Moved {file_name} to {destination_folder}")
 
@@ -178,7 +230,9 @@ def fetch_submission_urls(sheet_name, credentials_json):
         assignment = row.get("Assignment")
 
         if file_url and is_valid_url(file_url):
-            submission_data.append((file_url, name, timestamp, assignment))
+            email = row.get("Email Address")
+            submission_data.append((file_url, name, timestamp, assignment, email))
+
 
     print(f"✅ {len(submission_data)} submissions to process.")
     return submission_data
@@ -201,6 +255,7 @@ def update_sheet_with_results(sheet_name, credentials_json, timestamp, name, mar
         print(f"[⚠️] Could not find a matching row for {name} at {timestamp}")
 
 
+
 # Main function to process the submission
 def process_submission(sheet_name, credentials_json):
     folder_path = "studentsubmission"
@@ -212,7 +267,8 @@ def process_submission(sheet_name, credentials_json):
     sheet = gc.open(sheet_name).sheet1  # We’ll need it later for updates
     
     # Set up RAG for each assignment dynamically based on assignment names
-    for i, (file_url, student_name, timestamp, assignment_name) in enumerate(submissions):
+    for i, (file_url, student_name, timestamp, assignment_name, student_email) in enumerate(submissions):
+
         assignment_name = assignment_name.strip()
 
         sanitized_timestamp = sanitize_timestamp(timestamp)
@@ -231,11 +287,13 @@ def process_submission(sheet_name, credentials_json):
             continue
         
         # Set up RAG retriever from the rubric notebook
-        retriever = setup_rag_from_notebook(rubric_notebook_path)
+        retriever, assignment_question = setup_rag_from_notebook(rubric_notebook_path)
+
         
         # Extract code from the notebook and evaluate
         code = extract_code_from_notebook(destination_path)
-        result = evaluate_code(code, retriever)
+        result = evaluate_code(code, retriever, assignment_question)
+
 
         # ✅ Parse JSON result
         try:
@@ -257,13 +315,48 @@ def process_submission(sheet_name, credentials_json):
             print(f"[✅] Sheet updated for {student_name} at row {row_number}")
         except Exception as e:
             print(f"[⚠️] Failed to update sheet for {student_name}: {e}")
-
+        
         # Save the result and move the file
         save_result(result, destination_path)
         move_submission_to_destination(destination_path, "checked")
+        # Send the email with feedback and marks
+        # Send the email with feedback and marks
+        email_subject = f"Feedback for {assignment_name} - {marks}/100"
+        email_body = f"""<html>
+            <body>
+                <p>Dear <strong>{student_name}</strong>,</p>
+
+                <p>I hope this message finds you well.</p>
+
+                <p>I have reviewed your submission for the assignment '<strong>{assignment_name}</strong>' and would like to provide the following evaluation:</p>
+
+                <table border="1" cellpadding="10" cellspacing="0" style="border-collapse: collapse;">
+                    <tr>
+                        <th style="text-align: left;">Score</th>
+                        <td>{marks}/100</td>
+                    </tr>
+                    <tr>
+                        <th style="text-align: left;">Feedback</th>
+                        <td>{feedback}</td>
+                    </tr>
+                </table>
+
+                <p>If you have any questions or would like further clarification, please feel free to reach out to me.</p>
+
+                <p><strong>Best regards,</strong><br>
+                Dileep Kumar<br>
+                Instructor | DataCrumbs Team</p>
+            </body>
+        </html>"""
+
+
+
+        send_email(student_email, email_subject, email_body)
+        print(f"[📧] Feedback sent to {student_email}")
+
+
     
     return "All submissions processed."
-
 
 # Example usage
 sheet_name = 'Assignment Submission Form'  
