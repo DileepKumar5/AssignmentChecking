@@ -147,35 +147,26 @@ def fetch_submission_urls(sheet_name, credentials_json):
     _, gc = authenticate_google_services(credentials_json)
     sheet = gc.open(sheet_name).sheet1
     
-    # Fetch headers to get column indices dynamically
     headers = sheet.row_values(1)
-    print("Headers found in sheet:", headers)  # Debugging line
+    print("Headers found in sheet:", headers)
 
-    # Get the column indices dynamically
-    name_col_index = headers.index("Name")  # Column index for "Name"
-    timestamp_col_index = headers.index("Timestamp")  # Column index for "Timestamp"
-    file_url_col_index = headers.index("File Upload")  # Column index for "File Upload"
-    assignment_col_index = headers.index("Assignment")  # Column index for "Assignment"
-
-    # Fetch all rows of data
     rows = sheet.get_all_records()
 
-    # Extract the relevant data: Name, Timestamp, File URL, and Assignment
-    names = [row["Name"] for row in rows]
-    timestamps = [row["Timestamp"] for row in rows]
-    file_urls = [row["File Upload"] for row in rows]
-    assignments = [row["Assignment"] for row in rows]  # Get the assignment names like "Assignment 01"
+    submission_data = []
+    for row in rows:
+        if row.get("Status", "").strip().lower() == "checked":
+            continue  # Skip already checked submissions
 
-    # Filter out invalid or empty URLs
-    valid_urls = [url for url in file_urls if url and is_valid_url(url)]
-    
-    # Debugging: print valid URLs, names, timestamps, and assignments
-    print("Valid Submission URLs:", valid_urls)
-    print("Names:", names)
-    print("Timestamps:", timestamps)
-    print("Assignments:", assignments)
-    
-    return valid_urls, names, timestamps, assignments
+        name = row.get("Name")
+        timestamp = row.get("Timestamp")
+        file_url = row.get("File Upload")
+        assignment = row.get("Assignment")
+
+        if file_url and is_valid_url(file_url):
+            submission_data.append((file_url, name, timestamp, assignment))
+
+    print(f"✅ {len(submission_data)} submissions to process.")
+    return submission_data
 
 
 def update_sheet_with_results(sheet_name, credentials_json, timestamp, name, marks, feedback):
@@ -201,14 +192,13 @@ def process_submission(sheet_name, credentials_json):
     if not os.path.exists(folder_path):
         os.makedirs(folder_path)
     
-    submission_urls, names, timestamps, assignments = fetch_submission_urls(sheet_name, credentials_json)
-    drive_service, _ = authenticate_google_services(credentials_json)
+    submissions = fetch_submission_urls(sheet_name, credentials_json)
+    drive_service, gc = authenticate_google_services(credentials_json)
+    sheet = gc.open(sheet_name).sheet1  # We’ll need it later for updates
     
     # Set up RAG for each assignment dynamically based on assignment names
-    for i, file_url in enumerate(submission_urls):
-        student_name = names[i]
-        timestamp = timestamps[i]
-        assignment_name = assignments[i].strip()  # Clean up assignment name
+    for i, (file_url, student_name, timestamp, assignment_name) in enumerate(submissions):
+        assignment_name = assignment_name.strip()
 
         sanitized_timestamp = sanitize_timestamp(timestamp)
         filename = f"{student_name}_{sanitized_timestamp}.ipynb"
@@ -231,19 +221,28 @@ def process_submission(sheet_name, credentials_json):
         # Extract code from the notebook and evaluate
         code = extract_code_from_notebook(destination_path)
         result = evaluate_code(code, retriever)
-        # Parse the JSON result
+
+        # ✅ Parse JSON result
         try:
-            parsed_result = json.loads(result)
-            marks = parsed_result.get("score", 0)
-            feedback = parsed_result.get("feedback", "No feedback generated.")
+            result_json = json.loads(result)
+            marks = result_json.get("score", 0)
+            feedback = result_json.get("feedback", "No feedback provided.")
         except json.JSONDecodeError:
             marks = 0
             feedback = "❌ Failed to parse evaluation result."
             print("[⚠️] JSON parsing error in evaluation result")
-        # Update the Sheet with marks and feedback
-        update_sheet_with_results(sheet_name, credentials_json, timestamp, student_name, marks, feedback)
-
         
+        # ✅ Update the Google Sheet
+        try:
+            cell = sheet.find(timestamp)
+            row_number = cell.row
+            sheet.update(f"F{row_number}", marks)       # Marks
+            sheet.update(f"G{row_number}", feedback)    # Feedback
+            sheet.update(f"H{row_number}", "Checked")   # Status
+            print(f"[✅] Sheet updated for {student_name} at row {row_number}")
+        except Exception as e:
+            print(f"[⚠️] Failed to update sheet for {student_name}: {e}")
+
         # Save the result and move the file
         save_result(result, destination_path)
         move_submission_to_destination(destination_path, "checked")
