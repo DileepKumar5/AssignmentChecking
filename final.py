@@ -177,6 +177,24 @@ def fetch_submission_urls(sheet_name, credentials_json):
     
     return valid_urls, names, timestamps, assignments
 
+
+def update_sheet_with_results(sheet_name, credentials_json, timestamp, name, marks, feedback):
+    _, gc = authenticate_google_services(credentials_json)
+    sheet = gc.open(sheet_name).sheet1
+
+    all_records = sheet.get_all_records()
+    
+    for idx, row in enumerate(all_records, start=2):  # start=2 because header is row 1
+        if row["Name"].strip() == name.strip() and row["Timestamp"].strip() == timestamp.strip():
+            sheet.update_cell(idx, 6, marks)     # Column F: Marks
+            sheet.update_cell(idx, 7, feedback)  # Column G: Feedback
+            sheet.update_cell(idx, 8, "Checked") # Column H: Status
+            print(f"[✅] Sheet updated for {name} at row {idx}")
+            break
+    else:
+        print(f"[⚠️] Could not find a matching row for {name} at {timestamp}")
+
+
 # Main function to process the submission
 def process_submission(sheet_name, credentials_json):
     folder_path = "studentsubmission"
@@ -213,6 +231,18 @@ def process_submission(sheet_name, credentials_json):
         # Extract code from the notebook and evaluate
         code = extract_code_from_notebook(destination_path)
         result = evaluate_code(code, retriever)
+        # Parse the JSON result
+        try:
+            parsed_result = json.loads(result)
+            marks = parsed_result.get("score", 0)
+            feedback = parsed_result.get("feedback", "No feedback generated.")
+        except json.JSONDecodeError:
+            marks = 0
+            feedback = "❌ Failed to parse evaluation result."
+            print("[⚠️] JSON parsing error in evaluation result")
+        # Update the Sheet with marks and feedback
+        update_sheet_with_results(sheet_name, credentials_json, timestamp, student_name, marks, feedback)
+
         
         # Save the result and move the file
         save_result(result, destination_path)
