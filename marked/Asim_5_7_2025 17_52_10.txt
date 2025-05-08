@@ -1,4 +1,0 @@
-{
-    "score": 85,
-    "feedback": "The code implements the MNIST classification task effectively with appropriate data preprocessing, model building, training, evaluation, and saving. Good use of TensorFlow and sklearn libraries. Consider adding comments for better code readability and structure."
-}

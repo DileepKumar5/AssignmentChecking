@@ -1,4 +1,0 @@
-{
-  "score": 0,
-  "feedback": "The code submission is empty, which does not demonstrate any implementation of data science techniques or use of appropriate libraries. Please provide a complete code implementation to be evaluated."
-}

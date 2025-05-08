@@ -1,4 +1,0 @@
-{
-    "score": 0,
-    "feedback": "You did not implement any code. Your submission is just a copy of the assignment question. To receive credit, you must submit working Python code, including model training, evaluation, and comparison. Please try again."
-}

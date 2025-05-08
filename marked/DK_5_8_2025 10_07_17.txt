@@ -1,4 +1,0 @@
-{
-    "score": 90,
-    "feedback": "Great work overall! Your implementation of the data preprocessing, ANN, and CNN models aligns well with the assignment's objectives. Here are some points to consider for improvement: 1. In the CNN model, consider adding more convolutional and pooling layers to capture more complex patterns in the images. 2. Provide a more detailed comparison between the ANN and CNN models, discussing how the CNN architecture improved accuracy and reduced loss. 3. Include visualizations of training/validation accuracy and loss curves for both models. Keep up the good work and continue exploring advanced CNN architectures for image classification tasks."
-}
