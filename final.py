@@ -94,11 +94,26 @@ def evaluate_code(code_str, retriever):
         return_source_documents=False
     )
     prompt = f"""
-    You are an expert Python teacher. Evaluate this student's code based on the rubric.
-    Provide a score (0–100) and feedback. Feedback should not be long, just 3 or 4 sentences.
+    You are a senior Data Science instructor. Evaluate the student's code submission below.
+    Assess the solution for:
+        - Correct implementation of data science techniques
+        - Code quality, logic, and structure
+        - Use of appropriate libraries and practices (e.g., pandas, sklearn, matplotlib, etc.)
+        - Relevance and accuracy based on the assignment objectives
+
+    Give a score from 0 to 100 and a short feedback summary (2–4 concise, helpful sentences).
+
+    **Strictly return the result as a valid JSON object** in the format:
+    {{
+    "score": <integer between 0 and 100>,
+    "feedback": "<short, helpful feedback>"
+    }}
+
+    Here is the student's code:
 
     ```python
     {code_str}
+
     ```
 
     Return as valid JSON:

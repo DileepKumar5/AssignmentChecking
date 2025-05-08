@@ -1,0 +1,4 @@
+{
+    "score": 85,
+    "feedback": "The code demonstrates a solid implementation of data preprocessing and model training for both ANN and CNN. However, it lacks detailed comments and explanations for each step, which would enhance clarity. Additionally, while the performance comparison is included, a more thorough discussion of observations and conclusions is needed to fully meet the assignment objectives."
+}
